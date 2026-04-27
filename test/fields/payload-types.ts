@@ -650,11 +650,21 @@ export interface BlockField {
  */
 export interface ContentBlock {
   text: string;
-  richText?:
-    | {
+  richText?: {
+    root: {
+      type: string;
+      children: {
+        type: any;
+        version: number;
         [k: string]: unknown;
-      }[]
-    | null;
+      }[];
+      direction: ('ltr' | 'rtl') | null;
+      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
+      indent: number;
+      version: number;
+    };
+    [k: string]: unknown;
+  } | null;
   id?: string | null;
   blockName?: string | null;
   blockType: 'content';
@@ -726,11 +736,21 @@ export interface TabsBlock {
  */
 export interface LocalizedContentBlock {
   text: string;
-  richText?:
-    | {
+  richText?: {
+    root: {
+      type: string;
+      children: {
+        type: any;
+        version: number;
         [k: string]: unknown;
-      }[]
-    | null;
+      }[];
+      direction: ('ltr' | 'rtl') | null;
+      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
+      indent: number;
+      version: number;
+    };
+    [k: string]: unknown;
+  } | null;
   id?: string | null;
   blockName?: string | null;
   blockType: 'localizedContent';
@@ -1613,6 +1633,12 @@ export interface SlugField {
    */
   generateLocalizedSlug?: boolean | null;
   localizedSlug?: string | null;
+  /**
+   * When enabled, the slug will auto-generate from the title field on save and autosave.
+   */
+  generateReadOnlySlug?: boolean | null;
+  readOnlySlug?: string | null;
+  test?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -3376,6 +3402,9 @@ export interface SlugFieldsSelect<T extends boolean = true> {
   customSlugify?: T;
   generateLocalizedSlug?: T;
   localizedSlug?: T;
+  generateReadOnlySlug?: T;
+  readOnlySlug?: T;
+  test?: T;
   updatedAt?: T;
   createdAt?: T;
 }

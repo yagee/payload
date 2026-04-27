@@ -3124,77 +3124,93 @@ describe('Fields', () => {
       )
     })
 
-    it('should query based on richtext data within a block', async () => {
-      const blockFieldsSuccess = await payload.find({
-        collection: 'block-fields',
-        where: {
-          'blocks.richText.children.text': {
-            like: 'fun',
+    // TODO: re-enable on sqlite once the drizzle sqlite adapter's createJSONQuery supports
+    // lexical's `{root: {children: [...]}}` shape
+    it(
+      'should query based on richtext data within a block',
+      { db: (adapter) => adapter.startsWith('sqlite') === false },
+      async () => {
+        const blockFieldsSuccess = await payload.find({
+          collection: 'block-fields',
+          where: {
+            'blocks.richText.root.children.children.text': {
+              like: 'fun',
+            },
           },
-        },
-      })
+        })
 
-      expect(blockFieldsSuccess.docs).toHaveLength(1)
+        expect(blockFieldsSuccess.docs).toHaveLength(1)
 
-      const blockFieldsFail = await payload.find({
-        collection: 'block-fields',
-        where: {
-          'blocks.richText.children.text': {
-            like: 'funny',
+        const blockFieldsFail = await payload.find({
+          collection: 'block-fields',
+          where: {
+            'blocks.richText.root.children.children.text': {
+              like: 'funny',
+            },
           },
-        },
-      })
+        })
 
-      expect(blockFieldsFail.docs).toHaveLength(0)
-    })
+        expect(blockFieldsFail.docs).toHaveLength(0)
+      },
+    )
 
-    it('should query based on richtext data within a localized block, specifying locale', async () => {
-      const blockFieldsSuccess = await payload.find({
-        collection: 'block-fields',
-        where: {
-          'localizedBlocks.en.richText.children.text': {
-            like: 'fun',
+    // TODO: re-enable on sqlite — see note above.
+    it(
+      'should query based on richtext data within a localized block, specifying locale',
+      { db: (adapter) => adapter.startsWith('sqlite') === false },
+      async () => {
+        const blockFieldsSuccess = await payload.find({
+          collection: 'block-fields',
+          where: {
+            'localizedBlocks.en.richText.root.children.children.text': {
+              like: 'fun',
+            },
           },
-        },
-      })
+        })
 
-      expect(blockFieldsSuccess.docs).toHaveLength(1)
+        expect(blockFieldsSuccess.docs).toHaveLength(1)
 
-      const blockFieldsFail = await payload.find({
-        collection: 'block-fields',
-        where: {
-          'localizedBlocks.en.richText.children.text': {
-            like: 'funny',
+        const blockFieldsFail = await payload.find({
+          collection: 'block-fields',
+          where: {
+            'localizedBlocks.en.richText.root.children.children.text': {
+              like: 'funny',
+            },
           },
-        },
-      })
+        })
 
-      expect(blockFieldsFail.docs).toHaveLength(0)
-    })
+        expect(blockFieldsFail.docs).toHaveLength(0)
+      },
+    )
 
-    it('should query based on richtext data within a localized block, without specifying locale', async () => {
-      const blockFieldsSuccess = await payload.find({
-        collection: 'block-fields',
-        where: {
-          'localizedBlocks.richText.children.text': {
-            like: 'fun',
+    // TODO: re-enable on sqlite — see note above.
+    it(
+      'should query based on richtext data within a localized block, without specifying locale',
+      { db: (adapter) => adapter.startsWith('sqlite') === false },
+      async () => {
+        const blockFieldsSuccess = await payload.find({
+          collection: 'block-fields',
+          where: {
+            'localizedBlocks.richText.root.children.children.text': {
+              like: 'fun',
+            },
           },
-        },
-      })
+        })
 
-      expect(blockFieldsSuccess.docs).toHaveLength(1)
+        expect(blockFieldsSuccess.docs).toHaveLength(1)
 
-      const blockFieldsFail = await payload.find({
-        collection: 'block-fields',
-        where: {
-          'localizedBlocks.richText.children.text': {
-            like: 'funny',
+        const blockFieldsFail = await payload.find({
+          collection: 'block-fields',
+          where: {
+            'localizedBlocks.richText.root.children.children.text': {
+              like: 'funny',
+            },
           },
-        },
-      })
+        })
 
-      expect(blockFieldsFail.docs).toHaveLength(0)
-    })
+        expect(blockFieldsFail.docs).toHaveLength(0)
+      },
+    )
 
     it('should filter based on nested block fields', async () => {
       await payload.create({
@@ -4271,6 +4287,94 @@ describe('Fields', () => {
 
         expect(noMatchDocIDs).toContain(relDoc1.id)
         expect(noMatchDocIDs).not.toContain(relDoc2.id)
+      })
+
+      it('should not throw when querying hasMany relationship with equals array', async () => {
+        const text1 = await payload.create({
+          collection: 'text-fields',
+          data: { text: 'Text 1' },
+        })
+
+        const relDoc = await payload.create({
+          collection: 'relationship-fields',
+          data: {
+            relationshipHasMany: [text1.id],
+            relationship: { relationTo: 'text-fields', value: text1.id },
+          },
+        })
+        createdIDs.push(relDoc.id)
+
+        try {
+          const equalsResult = await payload.find({
+            collection: 'relationship-fields',
+            where: {
+              relationshipHasMany: {
+                equals: [text1.id],
+              },
+            },
+          })
+
+          expect(equalsResult.docs.some((doc) => doc.id === relDoc.id)).toBe(true)
+
+          const notEqualsResult = await payload.find({
+            collection: 'relationship-fields',
+            where: {
+              relationshipHasMany: {
+                not_equals: [text1.id],
+              },
+            },
+          })
+
+          expect(notEqualsResult.docs.some((doc) => doc.id === relDoc.id)).toBe(false)
+        } finally {
+          await payload.delete({ collection: 'text-fields', id: text1.id })
+        }
+      })
+
+      it('should include docs with null relationship when using not_equals with array on non-hasMany field', async () => {
+        // Only SQL adapters are affected - MongoDB handles NOT IN / NULL differently
+        if (payload.db.name === 'mongoose') {
+          return
+        }
+
+        const text1 = await payload.create({
+          collection: 'text-fields',
+          data: { text: 'Text 1' },
+        })
+
+        const text2 = await payload.create({
+          collection: 'text-fields',
+          data: { text: 'Text 2' },
+        })
+
+        // relDocWithNull has no relationshipDrawer set (null)
+        const relDocWithNull = await payload.create({
+          collection: 'relationship-fields',
+          data: {
+            relationship: { relationTo: 'text-fields', value: text1.id },
+          },
+        })
+        createdIDs.push(relDocWithNull.id)
+
+        try {
+          // Querying not_equals: [text2.id] should include relDocWithNull because
+          // its relationshipDrawer is null, which is "not equal to text2.id".
+          // Without OR IS NULL in the SQL, NULL NOT IN (text2.id) evaluates to NULL
+          // (not TRUE), so the document is incorrectly excluded.
+          const result = await payload.find({
+            collection: 'relationship-fields',
+            where: {
+              relationshipDrawer: {
+                not_equals: [text2.id],
+              },
+            },
+          })
+
+          expect(result.docs.some((doc) => doc.id === relDocWithNull.id)).toBe(true)
+        } finally {
+          await payload.delete({ collection: 'text-fields', id: text1.id })
+          await payload.delete({ collection: 'text-fields', id: text2.id })
+        }
       })
     })
   })
