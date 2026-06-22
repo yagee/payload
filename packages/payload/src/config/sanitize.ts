@@ -1,7 +1,6 @@
 import type { AcceptedLanguages } from '@payloadcms/translations'
 
 import { en } from '@payloadcms/translations/languages/en'
-import { deepMergeSimple } from '@payloadcms/translations/utilities'
 
 import type { OrderableJoinInfo } from '../fields/config/sanitizeJoinField.js'
 import type { CollectionSlug, GlobalSlug, SanitizedCollectionConfig } from '../index.js'
@@ -22,9 +21,8 @@ import { sanitizeCollection } from '../collections/config/sanitize.js'
 import { migrationsCollection } from '../database/migrations/migrationsCollection.js'
 import { DuplicateCollection, InvalidConfiguration } from '../errors/index.js'
 import { defaultTimezones } from '../fields/baseFields/timezone/defaultTimezones.js'
-import { addFolderCollection } from '../folders/addFolderCollection.js'
-import { addFolderFieldToCollection } from '../folders/addFolderFieldToCollection.js'
 import { sanitizeGlobal } from '../globals/config/sanitize.js'
+import { resolveHierarchyCollections } from '../hierarchy/resolveHierarchyCollections.js'
 import { baseBlockFields, formatLabels, sanitizeFields } from '../index.js'
 import {
   getLockedDocumentsCollection,
@@ -44,10 +42,6 @@ import { addOrderableEndpoint, addOrderableFieldsAndHook } from './orderable/ind
 const sanitizeAdminConfig = (configToSanitize: Config): Partial<SanitizedConfig> => {
   const sanitizedConfig = { ...configToSanitize }
 
-  if (configToSanitize?.compatibility?.allowLocalizedWithinLocalized) {
-    process.env.NEXT_PUBLIC_PAYLOAD_COMPATIBILITY_allowLocalizedWithinLocalized = 'true'
-  }
-
   // default logging level will be 'error' if not provided
   sanitizedConfig.loggingLevels = {
     Forbidden: 'info',
@@ -59,7 +53,7 @@ const sanitizeAdminConfig = (configToSanitize: Config): Partial<SanitizedConfig>
   }
   ;(sanitizedConfig.admin!.dashboard ??= { widgets: [] }).widgets.push({
     slug: 'collections',
-    Component: '@payloadcms/next/rsc#CollectionCards',
+    Component: '@payloadcms/ui/rsc#CollectionCards',
     minWidth: 'full',
   })
   sanitizedConfig.admin!.dashboard.defaultLayout ??= [
@@ -202,10 +196,6 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
     preferencesCollectionSlug,
   ]
 
-  if (config.folders !== false) {
-    validRelationships.push(config.folders!.slug)
-  }
-
   const dashboardWidgets = config.admin?.dashboard?.widgets ?? ([] as Widget[])
 
   for (const widget of dashboardWidgets) {
@@ -257,8 +247,6 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
     }
   }
 
-  const folderEnabledCollections: SanitizedCollectionConfig[] = []
-
   // Track orderable join fields during sanitization
   const orderableJoins: OrderableJoinInfo[] = []
 
@@ -283,15 +271,6 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
       }
     }
 
-    if (config.folders !== false && config.collections![i]!.folders) {
-      addFolderFieldToCollection({
-        collection: config.collections![i]!,
-        collectionSpecific: config.folders!.collectionSpecific,
-        folderFieldName: config.folders!.fieldName,
-        folderSlug: config.folders!.slug,
-      })
-    }
-
     config.collections![i] = await sanitizeCollection(
       config as unknown as Config,
       config.collections![i]!,
@@ -299,10 +278,6 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
       validRelationships,
       orderableJoins,
     )
-
-    if (config.folders !== false && config.collections![i]!.folders) {
-      folderEnabledCollections.push(config.collections![i]!)
-    }
   }
 
   // Process orderable features after all collections are sanitized
@@ -366,6 +341,9 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
     }
   }
 
+  // Resolve hierarchy relationships across collections (also adds sidebar tabs)
+  resolveHierarchyCollections(config as unknown as Config)
+
   if (schedulePublishCollections.length || schedulePublishGlobals.length) {
     ;((config.jobs ??= {} as SanitizedJobsConfig).tasks ??= []).push(
       getSchedulePublishTask({
@@ -411,21 +389,6 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
       defaultJobsCollection = config.jobs.jobsCollectionOverrides({
         defaultJobsCollection,
       })
-
-      const hooks = defaultJobsCollection?.hooks
-      // @todo - delete this check in 4.0
-      if (hooks && config?.jobs?.runHooks !== true) {
-        for (const [hookKey, hook] of Object.entries(hooks)) {
-          const defaultAmount = hookKey === 'afterRead' || hookKey === 'beforeChange' ? 1 : 0
-          if (hook.length > defaultAmount) {
-            // eslint-disable-next-line no-console
-            console.warn(
-              `The jobsCollectionOverrides function is returning a collection with an additional ${hookKey} hook defined. These hooks will not run unless the jobs.runHooks option is set to true. Setting this option to true will negatively impact performance.`,
-            )
-            break
-          }
-        }
-      }
     }
     const sanitizedJobsCollection = await sanitizeCollection(
       config as unknown as Config,
@@ -435,16 +398,6 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
     )
 
     ;(config.collections ??= []).push(sanitizedJobsCollection)
-  }
-
-  if (config.folders !== false && folderEnabledCollections.length) {
-    await addFolderCollection({
-      collectionSpecific: config.folders!.collectionSpecific,
-      config: config as unknown as Config,
-      folderEnabledCollections,
-      richTextSanitizationPromises,
-      validRelationships,
-    })
   }
 
   const lockedDocumentsCollection = getLockedDocumentsCollection(config as unknown as Config)
@@ -502,13 +455,8 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
     config.csrf!.push(config.serverURL!)
   }
 
-  const uploadAdapters = new Set<string>()
-  // interact with all collections
-  for (const collection of config.collections!) {
-    // deduped upload adapters
-    if (collection.upload?.adapter) {
-      uploadAdapters.add(collection.upload.adapter)
-    }
+  if (!config.storage) {
+    config.storage = []
   }
 
   if (!config.upload) {
@@ -533,9 +481,6 @@ export const sanitizeConfig = async (incomingConfig: Config): Promise<SanitizedC
       isRoot: true,
       parentIsLocalized: false,
     })
-    if (config.editor.i18n && Object.keys(config.editor.i18n).length >= 0) {
-      config.i18n.translations = deepMergeSimple(config.i18n.translations, config.editor.i18n)
-    }
   }
 
   const promises: Promise<void>[] = []

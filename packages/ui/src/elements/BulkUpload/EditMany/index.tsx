@@ -10,7 +10,7 @@ import { useTranslation } from '../../../providers/Translation/index.js'
 import { Drawer, DrawerToggler } from '../../Drawer/index.js'
 import { useFormsManager } from '../FormsManager/index.js'
 import { EditManyBulkUploadsDrawerContent } from './DrawerContent.js'
-import './index.scss'
+import './index.css'
 
 export const baseClass = 'edit-many-bulk-uploads'
 
@@ -39,6 +39,7 @@ export const EditManyBulkUploads: React.FC<EditManyBulkUploadsProps> = (props) =
     <div className={baseClass}>
       <DrawerToggler
         aria-label={t('general:editAll')}
+        buttonStyle="secondary"
         className={`${baseClass}__toggle`}
         slug={drawerSlug}
       >
